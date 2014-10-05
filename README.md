@@ -9,7 +9,7 @@ http://nanno.dip.jp/softlib/man/rlogin/sixel.tar.gz
 
 License
 --------
-This work is written by kmiya@culti.
+This work is written by kmiya@ culti.
 He distributes it under very permissive license.
 
 The original license text(in Japanese only) is:
