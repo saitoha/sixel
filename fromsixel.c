@@ -372,3 +372,14 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize)
 
     return im;
 }
+void FromSixelFree()
+{
+    int n;
+
+    for ( n = 0 ; n < PALMAX ; n++ )
+	sixel_palinit[n] = 0;
+
+    sixel_param = NULL;
+    sixel_gra   = NULL;
+    sixel_palfix = 0;
+}

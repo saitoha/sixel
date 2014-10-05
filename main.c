@@ -7,10 +7,11 @@
 
 typedef unsigned char BYTE;
 
-extern void gdImageSixel(gdImagePtr gd, FILE *out, int maxPalet, int optPalet);
-
-extern gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize);
-extern gdImagePtr gdImageCreateFromPnmPtr(int len, BYTE *p);
+void gdImageSixel(gdImagePtr gd, FILE *out, int maxPalet, int optPalet);
+gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize);
+void FromSixelFree();
+gdImagePtr gdImageCreateFromPnmPtr(int len, BYTE *p);
+//int gdImageTrueColorQuant(gdImagePtr oim, gdImagePtr pim, int dither, int maxColors);
 
 #define	FMT_GIF	    0
 #define	FMT_PNG	    1
@@ -63,31 +64,28 @@ static int FileFmt(int len, BYTE *data)
 
     return (-1);
 }
-static int ConvSixel(char *filename, int maxPalet, int optPalet,
-	int resWidth, int resHeight)
+
+static gdImagePtr LoadFile(char *filename, int bReSize)
 {
     int n, len, max;
     FILE *fp = stdin;
     BYTE *data;
     gdImagePtr im = NULL;
-    gdImagePtr dm = NULL;
-    int bReSize;
 
     if ( filename != NULL && (fp = fopen(filename, "r")) == NULL )
-	return (-1);
+	return NULL;
 
     len = 0;
     max = 64 * 1024;
-    bReSize = (resWidth > 0 || resHeight > 0 ? 1 : 0);
 
     if ( (data = (BYTE *)malloc(max)) == NULL )
-	return (-1);
+	return NULL;
 
     for ( ; ; ) {
 	if ( (max - len) < 4096 ) {
 	    max *= 2;
     	    if ( (data = (BYTE *)realloc(data, max)) == NULL )
-		return (-1);
+		return NULL;
 	}
 	if ( (n = fread(data + len, 1, 4096, fp)) <= 0 )
 	    break;
@@ -99,41 +97,56 @@ static int ConvSixel(char *filename, int maxPalet, int optPalet,
 
     switch(FileFmt(len, data)) {
 	case FMT_GIF:
-    	    im = gdImageCreateFromGifPtr(len, data);
+	    im = gdImageCreateFromGifPtr(len, data);
 	    break;
 	case FMT_PNG:
 	    im = gdImageCreateFromPngPtr(len, data);
 	    break;
 	case FMT_BMP:
-    	    im = gdImageCreateFromBmpPtr(len, data);
+	    im = gdImageCreateFromBmpPtr(len, data);
 	    break;
 	case FMT_JPG:
-    	    im = gdImageCreateFromJpegPtrEx(len, data, 1);
+	    im = gdImageCreateFromJpegPtrEx(len, data, 1);
 	    break;
 	case FMT_TGA:
-    	    im = gdImageCreateFromTgaPtr(len, data);
+	    im = gdImageCreateFromTgaPtr(len, data);
 	    break;
 	case FMT_WBMP:
-    	    im = gdImageCreateFromWBMPPtr(len, data);
+	    im = gdImageCreateFromWBMPPtr(len, data);
 	    break;
 	case FMT_TIFF:
-    	    im = gdImageCreateFromTiffPtr(len, data);
+	    im = gdImageCreateFromTiffPtr(len, data);
 	    break;
 	case FMT_SIXEL:
-    	    im = gdImageCreateFromSixelPtr(len, data, bReSize);
+	    im = gdImageCreateFromSixelPtr(len, data, bReSize);
 	    break;
 	case FMT_PNM:
-    	    im = gdImageCreateFromPnmPtr(len, data);
+	    im = gdImageCreateFromPnmPtr(len, data);
 	    break;
 	case FMT_GD2:
-    	    im = gdImageCreateFromGd2Ptr(len, data);
+	    im = gdImageCreateFromGd2Ptr(len, data);
 	    break;
     }
 
     free(data);
 
-    if ( im == NULL )
-	return 1;
+    return im;
+}
+
+static int ConvSixel(char *filename, int maxPalet, int optPalet,
+	int resWidth, int resHeight, gdImagePtr pm)
+{
+    gdImagePtr im = NULL;
+    gdImagePtr dm = NULL;
+    int bReSize;
+
+    FromSixelFree();
+    bReSize = (resWidth > 0 || resHeight > 0 ? 1 : 0);
+
+    if ( (im = LoadFile(filename, bReSize)) == NULL )
+	return (-1);
+
+    bReSize = (resWidth > 0 || resHeight > 0 ? 1 : 0);
 
     if ( bReSize ) {
 	if ( resWidth <= 0 )
@@ -155,6 +168,16 @@ static int ConvSixel(char *filename, int maxPalet, int optPalet,
     else if ( maxPalet > gdMaxColors )
 	maxPalet = gdMaxColors;
 
+/*****
+    if ( pm != NULL ) {
+	if ( !gdImageTrueColor(im) )
+	    gdImagePaletteToTrueColor(im);
+	gdImageTrueColorQuant(im, pm, 1, maxPalet);
+        FromSixelFree();
+	maxPalet = gdImageColorsTotal(pm);
+    }
+******/
+
     gdImageSixel(im, stdout, maxPalet, optPalet);
     gdImageDestroy(im);
 
@@ -169,9 +192,11 @@ int main(int ac, char *av[])
     int optPalet = 0;
     int resWidth = (-1);
     int resHeight = (-1);
+    char *mapFile = NULL;
+    gdImagePtr pm = NULL;
 
     for ( ; ; ) {
-	while ( (n = getopt(ac, av, "p:cw:h:")) != EOF ) {
+	while ( (n = getopt(ac, av, "p:cw:h:m:")) != EOF ) {
 	    switch(n) {
 	    case 'p':
 		maxPalet = atoi(optarg);
@@ -185,6 +210,9 @@ int main(int ac, char *av[])
 	    case 'h':
 		resHeight = atoi(optarg);
 		break;
+	    case 'm':
+		mapFile = optarg;
+		break;
 	    default:
 		fprintf(stderr, "Usage: %s [-p MaxPalet] [-c] [-w width] [-h height] <file name...>\n", av[0]);
 		exit(0);
@@ -195,12 +223,22 @@ int main(int ac, char *av[])
 	av[mx++] = av[optind++];
     }
 
+    if ( mapFile != NULL && (pm = LoadFile(mapFile, 0)) == NULL )
+	return 1;
+
+    if ( pm != NULL ) {
+	if ( !gdImageTrueColor(pm) ) {
+	    maxPalet = gdImageColorsTotal(pm);
+	    gdImagePaletteToTrueColor(pm);
+	}
+    }
+
     if ( mx <= 1 ) {
-	ConvSixel(NULL, maxPalet, optPalet, resWidth, resHeight);
+	ConvSixel(NULL, maxPalet, optPalet, resWidth, resHeight, pm);
 
     } else {
     	for ( n = 1 ; n < mx ; n++ )
-	    ConvSixel(av[n], maxPalet, optPalet, resWidth, resHeight);
+	    ConvSixel(av[n], maxPalet, optPalet, resWidth, resHeight, pm);
     }
 
     return 0;

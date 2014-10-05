@@ -35,8 +35,6 @@ extern int sixel_palfix;
 extern char sixel_palinit[];
 extern int sixel_palet[];
 
-gdImagePtr gdImageTrueColorQuant(gdImagePtr im, int maxPalet);
-
 static void PutData(int ch)
 {
     fputc(ch, out_fp);
