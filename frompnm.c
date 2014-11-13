@@ -107,15 +107,25 @@ gdImagePtr gdImageCreateFromPnmPtr(int len, BYTE *p)
 		        p = GetLine(p, e, tmp);
 		        s = tmp;
 		    }
-		    n = atoi(s);
-		    while ( isdigit(*s) )
-		        s++;
-		    while ( *s == ' ' )
-		        s++;
+		    if ( maps == 0 ) {
+			n = *s++ == '0';
+		    } else {
+		        n = atoi(s);
+		        while ( isdigit(*s) )
+		            s++;
+		        while ( *s == ' ' )
+		            s++;
+		    }
 	        } else {
 		    if ( p >= e )
 		        break;
-		    n = *(p++);
+		    if ( maps == 0 ) {
+			n = ((*p << (x & 0x7) >> 0x7) & 1) == 0; 
+ 			if ( (x & 0x7) == 0x7 ) 
+			    p++; 
+		    } else {
+		        n = *(p++);
+		    }
 	        }
 		c[i] = n;
 	    }
