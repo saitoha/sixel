@@ -4,9 +4,25 @@
 #include <string.h>
 #include <gd.h>
 
+#define PALMAX		1024
+#define HASHMAX		8
+
 #define	PALVAL(n,a,m)	(((n) * (a) + ((m) / 2)) / (m))
 
+#if USE_TRUECOLOR
+#define	RGBMASK		0xFFFFFFFF
+#else
+#define	RGBMASK		0xFFFEFEFE
+#endif
+
 typedef unsigned char BYTE;
+
+typedef struct _PalNode {
+	struct _PalNode *next;
+	int	idx;
+	int	rgb;
+	int	init;
+} PalNode;
 
 typedef struct _SixNode {
 	struct _SixNode *next;
@@ -23,17 +39,16 @@ static SixNode *node_free = NULL;
 
 static int save_pix = 0;
 static int save_count = 0;
-static char init_palet[gdMaxColors];
 static int act_palet = (-1);
 
-static long use_palet[gdMaxColors];
-static BYTE conv_palet[gdMaxColors];
+static PalNode	*palet_top[HASHMAX];
+static PalNode	palet_tab[PALMAX];
 
-extern char *sixel_param;
-extern char *sixel_gra;
-extern int sixel_palfix;
-extern char sixel_palinit[];
-extern int sixel_palet[];
+static int	palet_hash = HASHMAX;
+static int	palet_max = PALMAX;
+static int	map_width = 0;
+static int	map_height = 0;
+static BYTE	*bitmap = NULL;
 
 static void PutData(int ch)
 {
@@ -51,7 +66,7 @@ static void PutFmt(char *fmt, ...)
    va_end(ap);
 }
 
-static void PutFlash()
+static void PutFlush()
 {
     int n;
 
@@ -85,26 +100,33 @@ static void PutPixel(int pix)
     if ( pix == save_pix ) {
 	save_count++;
     } else {
-	PutFlash();
+	PutFlush();
 	save_pix = pix;
 	save_count = 1;
     }
 }
-static void PutPalet(gdImagePtr im, int pal)
+static void PutPalet(gdImagePtr im, int idx)
 {
     // DECGCI Graphics Color Introducer			# Pc ; Pu; Px; Py; Pz
 
-    if ( init_palet[pal] == 0 ) {
-    	PutFmt("#%d;2;%d;%d;%d", conv_palet[pal],
-		PALVAL(gdImageRed  (im, pal), 100, gdRedMax  ), 
-		PALVAL(gdImageGreen(im, pal), 100, gdGreenMax), 
-		PALVAL(gdImageBlue (im, pal), 100, gdBlueMax ));
-    	init_palet[pal] = 1;
+    if ( (palet_tab[idx].init & 001) == 0 ) {
+#if USE_TRUECOLOR
+    	PutFmt("#%d;3;%d;%d;%d", idx,
+		gdTrueColorGetRed  (palet_tab[idx].rgb), 
+		gdTrueColorGetGreen(palet_tab[idx].rgb), 
+		gdTrueColorGetBlue (palet_tab[idx].rgb));
+#else
+    	PutFmt("#%d;2;%d;%d;%d", idx,
+		PALVAL(gdTrueColorGetRed  (palet_tab[idx].rgb), 100, gdRedMax  ), 
+		PALVAL(gdTrueColorGetGreen(palet_tab[idx].rgb), 100, gdGreenMax  ), 
+		PALVAL(gdTrueColorGetBlue (palet_tab[idx].rgb), 100, gdBlueMax  ));
+#endif
+    	palet_tab[idx].init |= 1;
 
-    } else if ( act_palet != pal )
-    	PutFmt("#%d", conv_palet[pal]);
+    } else if ( act_palet != idx )
+    	PutFmt("#%d", idx);
 
-    act_palet = pal;
+    act_palet = idx;
 }
 static void PutCr()
 {
@@ -121,6 +143,8 @@ static void PutLf()
     // x = 0;
     // y += 6;
 }
+
+/****************************************************************/
 
 static void NodeFree()
 {
@@ -216,244 +240,154 @@ static int PutNode(gdImagePtr im, int x, SixNode *np)
     for ( ; x < np->mx ; x++ )
 	PutPixel(np->map[x]);
 
-    PutFlash();
+    PutFlush();
 
     return x;
 }
-static int PalUseCmp(const void *src, const void *dis)
+static void NodeFlush(gdImagePtr im)
 {
-    return use_palet[*((BYTE *)dis)] - use_palet[*((BYTE *)src)];
-}
-static int GetColIdx(gdImagePtr im, int col)
-{
-    int i, r, g, b, d;
-    int red   = gdTrueColorGetRed(col);
-    int green = gdTrueColorGetGreen(col);
-    int blue  = gdTrueColorGetBlue(col);
-    int idx   = (-1);
-    int min   = 0xFFFFFF;    // 255 * 255 * 3 + 255 * 255 * 9 + 255 * 255 = 845325 = 0x000CE60D
-
-    for ( i = 0 ; i < gdImageColorsTotal(im) ; i++ ) {
-	if ( i == gdImageGetTransparent(im) )
-	    continue;
-	r = gdImageRed  (im, i) - red;
-	g = gdImageGreen(im, i) - green;
-	b = gdImageBlue (im, i) - blue;
-	d = r * r * 3 + g * g * 9 + b * b;
-	if ( min > d ) {
-	    idx = i;
-	    min = d;
-	}
-    }
-    return idx;
-}
-
-
-void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet)
-{
-    int x, y, i, n, c;
-    int width, height;
-    int len, pix, skip;
-    int back = (-1);
-    BYTE *map;
+    int x;
     SixNode *np;
-    BYTE list[gdMaxColors];
 
-    out_fp = out;
-
-    width  = gdImageSX(im);
-    height = gdImageSY(im);
-
-    if ( maxPalet > gdMaxColors || maxPalet <= 0 )
-	maxPalet = gdMaxColors;
-
-    if ( !gdImageTrueColor(im) && gdImageColorsTotal(im) > maxPalet )
-	gdImagePaletteToTrueColor(im);
-
-    if ( gdImageTrueColor(im) ) {
-	// poor ... but fast
-	//gdImageTrueColorToPaletteSetMethod(im, GD_QUANT_JQUANT, 0);
-	// debug version ?
-	//gdImageTrueColorToPaletteSetMethod(im, GD_QUANT_NEUQUANT, 9);
-
-	// used libimagequant/pngquant2 best !!
-	//gdImageTrueColorToPaletteSetMethod(im, GD_QUANT_LIQ, 0);
-
-	gdImageTrueColorToPalette(im, 1, maxPalet);
-	sixel_palfix = 0;
+    for ( x = 0 ; x < palet_max ; x++ ) {
+	NodeLine(x, map_width, bitmap + x * map_width);
+	palet_tab[x].init &= 001;
     }
 
-    maxPalet = gdImageColorsTotal(im);
-    back = gdImageGetTransparent(im);
-    len = maxPalet * width;
-
-    if ( (map = (BYTE *)malloc(len)) == NULL )
-	return;
-
-    memset(map, 0, len);
-
-    for ( n = 0 ; n < maxPalet ; n++ )
-	conv_palet[n] = list[n] = n;
-
-    memset(init_palet, 0, sizeof(init_palet));
-
-    if ( sixel_palfix == 0 || optPalet != 0 ) { 
-
-	// Pass 1 Palet count
-
-        memset(use_palet, 0, sizeof(use_palet));
-	skip = (height / 240) * 6;
-
-    	for ( y = i = 0 ; y < height ; y++ ) {
-	    for ( x = 0 ; x < width ; x++ ) {
-	        pix = gdImagePalettePixel(im, x, y);
-	        if ( pix >= 0 && pix < maxPalet && pix != back )
-	    	    map[pix * width + x] |= (1 << i);
-	    }
-
-	    if ( ++i < 6 && (y + 1) < height )
-	        continue;
-
-	    for ( n = 0 ; n < maxPalet ; n++ )
-	        NodeLine(n, width, map + n * width);
-
-	    for ( x = 0 ; (np = node_top) != NULL ; ) {
-	        if ( x > np->sx )
-		    x = 0;
-
-		use_palet[np->pal]++;
-
-	        x = np->mx;
-	        NodeDel(np);
-	        np = node_top;
-
-	        while ( np != NULL ) {
-	    	    if ( np->sx < x ) {
-		        np = np->next;
-		        continue;
-		    }
-
-		    use_palet[np->pal]++;
-
-	            x = np->mx;
-		    NodeDel(np);
-		    np = node_top;
-	        }
-	    }
-
-	    i = 0;
-    	    memset(map, 0, len);
-	    y += skip;
+    for ( x = 0 ; (np = node_top) != NULL ; ) {
+	if ( x > np->sx ) {
+	    PutCr();
+	    x = 0;
 	}
 
-	qsort(list, maxPalet, sizeof(BYTE), PalUseCmp);
+	x = PutNode(im, x, np);
+	NodeDel(np);
+	np = node_top;
 
-	for ( n = 0 ; n < maxPalet ; n++ )
-	    conv_palet[list[n]] = n;
-
-    } else {
-	for ( n = 0 ; n < maxPalet && n < 16 ; n++ ) {
-	    if ( sixel_palinit[n] != 1 )
+	while ( np != NULL ) {
+	    if ( np->sx < x ) {
+		np = np->next;
 		continue;
-	    if ( (i = GetColIdx(im, sixel_palet[n])) < 0 )
-		continue;
-	    init_palet[i] = 1;
-	    if ( conv_palet[i] != n ) {
-		conv_palet[list[n]] = conv_palet[i];
-		list[conv_palet[i]] = list[n];
-		conv_palet[i] = n;
-		list[n] = i;
-	    }
-	}
-    }
-
-/*************
-    for ( n = 0 ; n < maxPalet ; n++ )
-	fprintf(stderr, "%d %d=%d\n", n, list[n], conv_palet[list[n]]);
-**************/
-
-    PutStr("\033P");
-
-    if ( sixel_param != NULL )
-	PutStr(sixel_param);
-
-    PutData('q');
-
-    if ( sixel_gra != NULL )
-	PutStr(sixel_gra);
-    else
-        PutFmt("\"1;1;%d;%d", width, height);
-
-    PutData('\n');
-
-#ifdef USE_INITPAL
-
-    for ( n = 0 ; n < maxPalet ; n++ )
-	list[conv_palet[n]] = n;
-
-    for ( n = i = 0 ; n < maxPalet ; n++ ) {
-    	if ( init_palet[n] != 0 || list[n] == back )
-	    continue;
-
-    	PutFmt("#%d;2;%d;%d;%d", n,
-		PALVAL(gdImageRed  (im, list[n]), 100, gdRedMax  ), 
-		PALVAL(gdImageGreen(im, list[n]), 100, gdGreenMax), 
-		PALVAL(gdImageBlue (im, list[n]), 100, gdBlueMax ));
-    	init_palet[n] = 1;
-
-	if ( ++i > 4 ) {
-    	    PutData('\n');
-	    i = 0;
-	}
-    }
-
-    if ( i > 0 )
-    	PutData('\n');
-#endif
-
-    for ( y = i = 0 ; y < height ; y++ ) {
-	for ( x = 0 ; x < width ; x++ ) {
-	    pix = gdImagePalettePixel(im, x, y);
-	    if ( pix >= 0 && pix < maxPalet && pix != back )
-	    	map[pix * width + x] |= (1 << i);
-	}
-
-	if ( ++i < 6 && (y + 1) < height )
-	    continue;
-
-	for ( n = 0 ; n < maxPalet ; n++ )
-	    NodeLine(n, width, map + n * width);
-
-	for ( x = 0 ; (np = node_top) != NULL ; ) {
-	    if ( x > np->sx ) {
-		PutCr();
-		x = 0;
 	    }
 
 	    x = PutNode(im, x, np);
 	    NodeDel(np);
 	    np = node_top;
+	}
+    }
+    
+    memset(bitmap, 0, map_width * palet_max);
+}
 
-	    while ( np != NULL ) {
-	    	if ( np->sx < x ) {
-		    np = np->next;
-		    continue;
-		}
+/****************************************************************/
 
-		x = PutNode(im, x, np);
-		NodeDel(np);
-		np = node_top;
+static void PalInit(int max)
+{
+    int n, hs = 0;
+
+    for ( n = 0 ; n < HASHMAX ; n++ )
+    	palet_top[n] = NULL;
+
+    if ( max > PALMAX )
+	max = PALMAX;
+
+    for ( palet_hash = HASHMAX ; palet_hash > 0 && (max / palet_hash) < 16 ; )
+	palet_hash /= 2;
+
+    for ( n = max - 1 ; n >= 0 ; n-- ) {
+    	palet_tab[n].idx = n;
+        palet_tab[n].rgb = 0xFF000000;
+        palet_tab[n].init = 0;
+
+    	palet_tab[n].next = palet_top[hs];
+    	palet_top[hs] = &(palet_tab[n]);
+
+	if ( ++hs >= palet_hash )
+	    hs = 0;
+    }
+}
+
+static int PalAdd(gdImagePtr im, int x, int y)
+{
+    int hs, rgb;
+    PalNode *bp, *tp, tmp;
+
+    rgb = gdImageGetTrueColorPixel(im, x, y) & RGBMASK;
+    hs = (rgb * 31) & (palet_hash - 1);
+
+    bp = &tmp;
+    tp = bp->next = palet_top[hs];
+
+    for ( ; ; ) {
+	if ( tp->rgb == rgb )
+	    goto ENDOF;
+
+	if ( tp->next == NULL )
+	    break;
+
+	bp = tp;
+	tp = tp->next;
+    }
+
+    if ( (tp->init & 002) != 0 ) {
+	NodeFlush(im);
+    	PutCr();
+    }
+
+    tp->rgb = rgb;
+    tp->init = 0;
+
+ENDOF:
+    tp->init |= 002;
+    bp->next = tp->next;
+    tp->next = tmp.next;
+    palet_top[hs] = tp;
+    return tp->idx;
+}
+
+/****************************************************************/
+
+void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet)
+{
+    int x, y, i;
+    int idx;
+    SixNode *np;
+
+    out_fp = out;
+
+    map_width  = gdImageSX(im);
+    map_height = gdImageSY(im);
+
+    if ( (palet_max = maxPalet) > PALMAX || palet_max <= 0 )
+	maxPalet = PALMAX;
+
+    if ( !gdImageTrueColor(im) )
+	gdImagePaletteToTrueColor(im);
+
+    PalInit(palet_max);
+
+    if ( (bitmap = (BYTE *)malloc(map_width * palet_max)) == NULL )
+	return;
+
+    memset(bitmap, 0, map_width * palet_max);
+
+    PutFmt("\033Pq\"1;1;%d;%d\n", map_width, map_height);
+
+    for ( y = 0 ; y < map_height ; y += 6 ) {
+	for ( x = 0 ; x < map_width ; x++ ) {
+	    for ( i = 0 ; i < 6 && (y + i) < map_height ; i++ ) {
+	    	idx = PalAdd(im, x, y + i);
+		if ( gdTrueColorGetAlpha(palet_tab[idx].rgb) == gdAlphaOpaque )
+	    	    bitmap[idx * map_width + x] |= (1 << i);
 	    }
 	}
 
+	NodeFlush(im);
 	PutLf();
-
-	i = 0;
-    	memset(map, 0, len);
     }
 
     PutStr("\033\\");
 
     NodeFree();
-    free(map);
+    free(bitmap);
 }

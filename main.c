@@ -9,7 +9,6 @@ typedef unsigned char BYTE;
 
 void gdImageSixel(gdImagePtr gd, FILE *out, int maxPalet, int optPalet);
 gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize);
-void FromSixelFree();
 gdImagePtr gdImageCreateFromPnmPtr(int len, BYTE *p);
 //int gdImageTrueColorQuant(gdImagePtr oim, gdImagePtr pim, int dither, int maxColors);
 
@@ -140,7 +139,6 @@ static int ConvSixel(char *filename, int maxPalet, int optPalet,
     gdImagePtr dm = NULL;
     int bReSize;
 
-    FromSixelFree();
     bReSize = (resWidth > 0 || resHeight > 0 ? 1 : 0);
 
     if ( (im = LoadFile(filename, bReSize)) == NULL )
@@ -173,7 +171,6 @@ static int ConvSixel(char *filename, int maxPalet, int optPalet,
 	if ( !gdImageTrueColor(im) )
 	    gdImagePaletteToTrueColor(im);
 	gdImageTrueColorQuant(im, pm, 1, maxPalet);
-        FromSixelFree();
 	maxPalet = gdImageColorsTotal(pm);
     }
 ******/
@@ -195,7 +192,6 @@ int main(int ac, char *av[])
     char *mapFile = NULL;
     gdImagePtr pm = NULL;
 
-    for ( ; ; ) {
 	while ( (n = getopt(ac, av, "p:cw:h:m:")) != EOF ) {
 	    switch(n) {
 	    case 'p':
@@ -218,10 +214,9 @@ int main(int ac, char *av[])
 		exit(0);
 	    }
 	}
-	if ( optind >= ac )
-	    break;
+
+    while ( optind < ac )
 	av[mx++] = av[optind++];
-    }
 
     if ( mapFile != NULL && (pm = LoadFile(mapFile, 0)) == NULL )
 	return 1;
