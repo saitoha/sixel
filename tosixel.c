@@ -258,6 +258,7 @@ void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet)
     BYTE *map;
     SixNode *np;
     BYTE list[gdMaxColors];
+    SixNode *next;
 
     out_fp = out;
 
@@ -324,8 +325,9 @@ void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet)
 		use_palet[np->pal]++;
 
 	        x = np->mx;
+		next = np->next;
 	        NodeDel(np);
-	        np = node_top;
+	        np = next;
 
 	        while ( np != NULL ) {
 	    	    if ( np->sx < x ) {
@@ -336,8 +338,9 @@ void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet)
 		    use_palet[np->pal]++;
 
 	            x = np->mx;
+		    next = np->next;
 		    NodeDel(np);
-		    np = node_top;
+		    np = next;
 	        }
 	    }
 
