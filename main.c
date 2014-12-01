@@ -7,7 +7,7 @@
 
 typedef unsigned char BYTE;
 
-void gdImageSixel(gdImagePtr gd, FILE *out, int maxPalet, int optPalet);
+void gdImageSixel(gdImagePtr gd, FILE *out, int maxPalet, int optPalet, int optFill);
 gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize);
 void FromSixelFree();
 gdImagePtr gdImageCreateFromPnmPtr(int len, BYTE *p);
@@ -133,7 +133,7 @@ static gdImagePtr LoadFile(char *filename, int bReSize)
     return im;
 }
 
-static int ConvSixel(char *filename, int maxPalet, int optPalet,
+static int ConvSixel(char *filename, int maxPalet, int optPalet, int optFill,
 	int resWidth, int resHeight, gdImagePtr pm)
 {
     gdImagePtr im = NULL;
@@ -178,7 +178,7 @@ static int ConvSixel(char *filename, int maxPalet, int optPalet,
     }
 ******/
 
-    gdImageSixel(im, stdout, maxPalet, optPalet);
+    gdImageSixel(im, stdout, maxPalet, optPalet, optFill);
     gdImageDestroy(im);
 
     return 0;
@@ -190,13 +190,14 @@ int main(int ac, char *av[])
     int mx = 1;
     int maxPalet = gdMaxColors;
     int optPalet = 0;
+    int optFill = 0;
     int resWidth = (-1);
     int resHeight = (-1);
     char *mapFile = NULL;
     gdImagePtr pm = NULL;
 
     for ( ; ; ) {
-	while ( (n = getopt(ac, av, "p:cw:h:m:")) != EOF ) {
+	while ( (n = getopt(ac, av, "p:cw:h:m:f")) != EOF ) {
 	    switch(n) {
 	    case 'p':
 		maxPalet = atoi(optarg);
@@ -212,6 +213,9 @@ int main(int ac, char *av[])
 		break;
 	    case 'm':
 		mapFile = optarg;
+		break;
+	    case 'f':
+		optFill = 1;
 		break;
 	    default:
 		fprintf(stderr, "Usage: %s [-p MaxPalet] [-c] [-w width] [-h height] <file name...>\n", av[0]);
@@ -234,11 +238,11 @@ int main(int ac, char *av[])
     }
 
     if ( mx <= 1 ) {
-	ConvSixel(NULL, maxPalet, optPalet, resWidth, resHeight, pm);
+	ConvSixel(NULL, maxPalet, optPalet, optFill, resWidth, resHeight, pm);
 
     } else {
     	for ( n = 1 ; n < mx ; n++ )
-	    ConvSixel(av[n], maxPalet, optPalet, resWidth, resHeight, pm);
+	    ConvSixel(av[n], maxPalet, optPalet, optFill, resWidth, resHeight, pm);
     }
 
     return 0;

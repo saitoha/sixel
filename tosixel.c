@@ -151,7 +151,7 @@ static void NodeDel(SixNode *np)
     np->next = node_free;
     node_free = np;
 }
-static void NodeAdd(int pal, int sx, int mx, BYTE *map)
+static void NodeAdd(int pal, int sx, int mx, BYTE *map, int cmp)
 {
     SixNode *np, *tp, top;
 
@@ -169,6 +169,8 @@ static void NodeAdd(int pal, int sx, int mx, BYTE *map)
     tp = &top;
 
     while ( tp->next != NULL ) {
+	if ( cmp != (-1) && tp->next->pal != cmp )
+	    break;
 	if ( np->sx < tp->next->sx )
 	    break;
 	else if ( np->sx == tp->next->sx && np->mx > tp->next->mx )
@@ -180,9 +182,10 @@ static void NodeAdd(int pal, int sx, int mx, BYTE *map)
     tp->next = np;
     node_top = top.next;
 }
-static void NodeLine(int pal, int width, BYTE *map)
+static int NodeLine(int pal, int width, BYTE *map, int cmp)
 {
     int sx, mx, n;
+    int count = 0;
 
     for ( sx = 0 ; sx < width ; sx++ ) {
 	if ( map[sx] == 0 )
@@ -202,9 +205,43 @@ static void NodeLine(int pal, int width, BYTE *map)
 	    mx = mx + n - 1;
 	}
 
-	NodeAdd(pal, sx, mx, map);
+	NodeAdd(pal, sx, mx, map, cmp);
 	sx = mx - 1;
+	count++;
     }
+
+    return count;
+}
+static void NodeFill(int pal, int max, int width, BYTE *map)
+{
+    int n, x, sx, ex;
+    SixNode *np, *nx;
+
+    for ( np = node_top ; np != NULL ; ) {
+	nx = np->next;
+	if ( np->pal == pal )
+	    NodeDel(np);
+	np = nx;
+    }
+
+    for ( sx = 0 ; sx < width ; sx++ ) {
+	if ( map[width * pal + sx] != 0 )
+	    break;
+    }
+
+    for ( ex = width - 1 ; ex > sx ; ex-- ) {
+	if ( map[width * pal + ex] != 0 )
+	    break;
+    }
+
+    for ( n = 0 ; n < max ; n++ ) {
+	if ( n == pal )
+	    continue;
+	for ( x = sx ; x < ex ; x++ )
+	    map[width * pal + x] |= map[width * n + x];
+    }
+
+    n = NodeLine(pal, width, map + width * pal, pal);
 }
 static int PutNode(gdImagePtr im, int x, SixNode *np)
 {
@@ -249,15 +286,17 @@ static int GetColIdx(gdImagePtr im, int col)
 }
 
 
-void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet)
+void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet, int optFill)
 {
     int x, y, i, n, c;
     int width, height;
     int len, pix, skip;
     int back = (-1);
     BYTE *map;
-    SixNode *np;
+    SixNode *np, *next;
     BYTE list[gdMaxColors];
+    int node_max_idx;
+    int node_max_count;
 
     out_fp = out;
 
@@ -315,7 +354,7 @@ void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet)
 	        continue;
 
 	    for ( n = 0 ; n < maxPalet ; n++ )
-	        NodeLine(n, width, map + n * width);
+	        NodeLine(n, width, map + n * width, (-1));
 
 	    for ( x = 0 ; (np = node_top) != NULL ; ) {
 	        if ( x > np->sx )
@@ -336,8 +375,9 @@ void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet)
 		    use_palet[np->pal]++;
 
 	            x = np->mx;
+		    next = np->next;
 		    NodeDel(np);
-		    np = node_top;
+		    np = next;
 	        }
 	    }
 
@@ -421,8 +461,19 @@ void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet)
 	if ( ++i < 6 && (y + 1) < height )
 	    continue;
 
-	for ( n = 0 ; n < maxPalet ; n++ )
-	    NodeLine(n, width, map + n * width);
+	node_max_idx = (-1);
+	node_max_count = 0;
+
+	for ( n = 0 ; n < maxPalet ; n++ ) {
+	    c = NodeLine(n, width, map + n * width, (-1));
+	    if ( node_max_count < c ) {
+		node_max_count = c;
+		node_max_idx = n;
+	    }
+	}
+
+	if ( optFill && node_max_idx >= 0 )
+	    NodeFill(node_max_idx, maxPalet, width, map);
 
 	for ( x = 0 ; (np = node_top) != NULL ; ) {
 	    if ( x > np->sx ) {
@@ -441,8 +492,9 @@ void gdImageSixel(gdImagePtr im, FILE *out, int maxPalet, int optPalet)
 		}
 
 		x = PutNode(im, x, np);
+		next = np->next;
 		NodeDel(np);
-		np = node_top;
+		np = next;
 	    }
 	}
 
