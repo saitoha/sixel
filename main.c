@@ -7,11 +7,9 @@
 
 typedef unsigned char BYTE;
 
-void gdImageSixel(gdImagePtr gd, FILE *out, int maxPalet, int optPalet, int optFill);
-gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize);
-void FromSixelFree();
+void gdImageSixel(gdImagePtr gd, FILE *out, int maxPalet, int optTrue, int optFill);
+gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p);
 gdImagePtr gdImageCreateFromPnmPtr(int len, BYTE *p);
-//int gdImageTrueColorQuant(gdImagePtr oim, gdImagePtr pim, int dither, int maxColors);
 
 #define	FMT_GIF	    0
 #define	FMT_PNG	    1
@@ -65,7 +63,7 @@ static int FileFmt(int len, BYTE *data)
     return (-1);
 }
 
-static gdImagePtr LoadFile(char *filename, int bReSize)
+static gdImagePtr LoadFile(char *filename)
 {
     int n, len, max;
     FILE *fp = stdin;
@@ -118,7 +116,7 @@ static gdImagePtr LoadFile(char *filename, int bReSize)
 	    im = gdImageCreateFromTiffPtr(len, data);
 	    break;
 	case FMT_SIXEL:
-	    im = gdImageCreateFromSixelPtr(len, data, bReSize);
+	    im = gdImageCreateFromSixelPtr(len, data);
 	    break;
 	case FMT_PNM:
 	    im = gdImageCreateFromPnmPtr(len, data);
@@ -133,20 +131,17 @@ static gdImagePtr LoadFile(char *filename, int bReSize)
     return im;
 }
 
-static int ConvSixel(char *filename, int maxPalet, int optPalet, int optFill,
-	int resWidth, int resHeight, gdImagePtr pm)
+static int ConvSixel(char *filename, int maxPalet,
+		int optTrue, int optFill, int resWidth, int resHeight)
 {
     gdImagePtr im = NULL;
     gdImagePtr dm = NULL;
     int bReSize;
 
-    FromSixelFree();
     bReSize = (resWidth > 0 || resHeight > 0 ? 1 : 0);
 
-    if ( (im = LoadFile(filename, bReSize)) == NULL )
+    if ( (im = LoadFile(filename)) == NULL )
 	return (-1);
-
-    bReSize = (resWidth > 0 || resHeight > 0 ? 1 : 0);
 
     if ( bReSize ) {
 	if ( resWidth <= 0 )
@@ -163,86 +158,58 @@ static int ConvSixel(char *filename, int maxPalet, int optPalet, int optFill,
 	im = dm;
     }
 
-    if ( maxPalet < 2 )
-	maxPalet = 2;
-    else if ( maxPalet > gdMaxColors )
-	maxPalet = gdMaxColors;
-
-/*****
-    if ( pm != NULL ) {
-	if ( !gdImageTrueColor(im) )
-	    gdImagePaletteToTrueColor(im);
-	gdImageTrueColorQuant(im, pm, 1, maxPalet);
-        FromSixelFree();
-	maxPalet = gdImageColorsTotal(pm);
-    }
-******/
-
-    gdImageSixel(im, stdout, maxPalet, optPalet, optFill);
+    gdImageSixel(im, stdout, maxPalet, optTrue, optFill);
     gdImageDestroy(im);
 
     return 0;
 }
-
+void usage(char *name)
+{
+    fprintf(stderr, "Usage: %s [-p MaxPalet] [-tf] "\
+		    "[-w width] [-h height] <file name...>\n", name);
+}
 int main(int ac, char *av[])
 {
     int n;
     int mx = 1;
     int maxPalet = gdMaxColors;
-    int optPalet = 0;
+    int optTrue = 0;
     int optFill = 0;
     int resWidth = (-1);
     int resHeight = (-1);
-    char *mapFile = NULL;
-    gdImagePtr pm = NULL;
 
-    for ( ; ; ) {
-	while ( (n = getopt(ac, av, "p:cw:h:m:f")) != EOF ) {
-	    switch(n) {
-	    case 'p':
-		maxPalet = atoi(optarg);
-		break;
-	    case 'c':
-		optPalet = 1;
-		break;
-	    case 'w':
-		resWidth = atoi(optarg);
-		break;
-	    case 'h':
-		resHeight = atoi(optarg);
-		break;
-	    case 'm':
-		mapFile = optarg;
-		break;
-	    case 'f':
-		optFill = 1;
-		break;
-	    default:
-		fprintf(stderr, "Usage: %s [-p MaxPalet] [-c] [-w width] [-h height] <file name...>\n", av[0]);
-		exit(0);
-	    }
-	}
-	if ( optind >= ac )
+    while ( (n = getopt(ac, av, "p:w:h:tf")) != EOF ) {
+	switch(n) {
+	case 'p':
+	    maxPalet = atoi(optarg);
 	    break;
-	av[mx++] = av[optind++];
-    }
-
-    if ( mapFile != NULL && (pm = LoadFile(mapFile, 0)) == NULL )
-	return 1;
-
-    if ( pm != NULL ) {
-	if ( !gdImageTrueColor(pm) ) {
-	    maxPalet = gdImageColorsTotal(pm);
-	    gdImagePaletteToTrueColor(pm);
+	case 'w':
+	    resWidth = atoi(optarg);
+	    break;
+	case 'h':
+	    resHeight = atoi(optarg);
+	    break;
+	case 't':
+	    optTrue = 1;
+	    break;
+	case 'f':
+	    optFill = 1;
+	    break;
+	default:
+	    usage(av[0]);
+	    exit(0);
 	}
     }
+
+    while ( optind < ac )
+	av[mx++] = av[optind++];
 
     if ( mx <= 1 ) {
-	ConvSixel(NULL, maxPalet, optPalet, optFill, resWidth, resHeight, pm);
+	ConvSixel(NULL, maxPalet, optTrue, optFill, resWidth, resHeight);
 
     } else {
     	for ( n = 1 ; n < mx ; n++ )
-	    ConvSixel(av[n], maxPalet, optPalet, optFill, resWidth, resHeight, pm);
+	    ConvSixel(av[n], maxPalet, optTrue, optFill, resWidth, resHeight);
     }
 
     return 0;

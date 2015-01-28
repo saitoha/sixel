@@ -8,6 +8,12 @@ LFLAGS = -L/usr/local/lib -lgd
 # xterm sixel compatible ?
 #CFLAGS+= -DUSE_INITPAL
 
+# sixel true color extend
+#CFLAGS+= -DUSE_TRUECOLOR
+
+# simple histogram
+#CFLAGS+= -DUSE_HISMAP
+
 OBJS = main.o tosixel.o fromsixel.o frompnm.o
 PROG = sixel
 

@@ -15,12 +15,6 @@ typedef unsigned char BYTE;
 #define	HLSMAX	100
 #define	PALMAX	1024
 
-char *sixel_param = NULL;
-char *sixel_gra   = NULL;
-int sixel_palfix = 0;
-char sixel_palinit[PALMAX];
-int sixel_palet[PALMAX];
-
 static int ColTab[] = {
 	XRGB( 0,  0,  0),	//  0 Black
 	XRGB(20, 20, 80),	//  1 Blue
@@ -103,7 +97,7 @@ static BYTE *GetParam(BYTE *p, int *param, int *len)
     }
     return p;
 }
-gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize)
+gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p)
 {
     int n, i, a, b, c;
     int px, py;
@@ -114,12 +108,11 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize)
     int param[10];
     gdImagePtr im, dm;
     BYTE *s;
-    static char pam[256];
-    static char gra[256];
+    int palet[PALMAX];
 
     px = py = 0;
     mx = my = 0;
-    ax = 2; ay = 1;
+    ax = 50; ay = 100;
     tx = ty = 0;
     rep = 1;
     col = 0;
@@ -130,72 +123,58 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize)
     im->alphaBlendingFlag = 0;
 
     for ( n = 0 ; n < 16 ; n++ )
-	sixel_palet[n] = ColTab[n];
+	palet[n] = ColTab[n];
 
     // colors 16-231 are a 6x6x6 color cube
     for ( a = 0 ; a < 6 ; a++ ) {
 	for ( b = 0 ; b < 6 ; b++ ) {
 	    for ( c = 0 ; c < 6 ; c++ )
-		sixel_palet[n++] = gdTrueColor(a * 51, b * 51, c * 51);
+		palet[n++] = gdTrueColor(a * 51, b * 51, c * 51);
 	}
     }
     // colors 232-255 are a grayscale ramp, intentionally leaving out
     for ( a = 0 ; a < 24 ; a++ )
-	sixel_palet[n++] = gdTrueColor(a * 11, a * 11, a * 11);
+	palet[n++] = gdTrueColor(a * 11, a * 11, a * 11);
 
     bc = gdTrueColorAlpha(gdRedMax, gdGreenMax, gdBlueMax, gdAlphaMax);
 
     for ( ; n < PALMAX ; n++ )
-	sixel_palet[n] = gdTrueColor(gdRedMax, gdGreenMax, gdBlueMax);
+	palet[n] = gdTrueColor(gdRedMax, gdGreenMax, gdBlueMax);
 
     gdImageFill(im, 0, 0, bc);
 
-    pam[0] = gra[0] = '\0';
-    sixel_param = pam;
-    sixel_gra   = gra;
-
-    for ( n = 0 ; n < PALMAX ; n++ )
-	sixel_palinit[n] = 0;
-
-    sixel_palfix = 0;
-
     while ( *p != '\0' ) {
 	if ( (p[0] == '\033' && p[1] == 'P') || *p == 0x90 ) {
+
 	    if ( *p == '\033' )
 		p++;
 
-	    s = ++p;
-            p = GetParam(p, param, &n);
-	    if ( s < p ) {
-		for ( i = 0 ; i < 255 && s < p ; )
-		    pam[i++] = *(s++);
-		pam[i] = '\0';
-	    }
+            p = GetParam(++p, param, &n);
 
 	    if ( *p == 'q' ) {
 		p++;
 
 		if ( n > 0 ) {	// Pn1
 		    switch(param[0]) {
-		    case 0: case 1: ay = 2; break;
-		    case 2: ay = 5; break;
-		    case 3: ay = 4; break;
-		    case 4: ay = 4; break;
-		    case 5: ay = 3; break;
-		    case 6: ay = 3; break;
-		    case 7: ay = 2; break;
-		    case 8: ay = 2; break;
-		    case 9: ay = 1; break;
+		    case 2: ax = 20; break;
+		    case 3: ax = 30; break;
+		    case 4: ax = 40; break;
+		    case 5: ax = 60; break;
+		    case 6: ax = 70; break;
+		    case 7: ax = 80; break;
+		    case 8: ax = 90; break;
+		    case 9: ax = 100; break;
+		    default: ax = 50; break;
 		    }
 		}
 
 		if ( n > 2 ) {	// Pn3
 		    if ( param[2] == 0 )
 			param[2] = 10;
-		    ax = ax * param[2] / 10;
-		    ay = ay * param[2] / 10;
-            	    if ( ax <= 0 ) ax = 1;
-            	    if ( ay <= 0 ) ay = 1;
+		    ay = param[2] * 1000 / ax;
+		    ax = param[2] * 10;
+            	    if ( ax < 10 ) ax = 10;
+            	    if ( ay < 10 ) ay = 10;
 		}
 	    }
 
@@ -203,21 +182,16 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize)
 	    break;
 
         } else if ( *p == '"' ) { // DECGRA Set Raster Attributes " Pan ; Pad ; Ph ; Pv 
-	    s = p++;
-            p = GetParam(p, param, &n);
-	    if ( s < p ) {
-		for ( i = 0 ; i < 255 && s < p ; )
-		    gra[i++] = *(s++);
-		gra[i] = '\0';
-	    }
 
-            if ( n > 0 ) ay = param[0];
-            if ( n > 1 ) ax = param[1];
+            p = GetParam(++p, param, &n);
+
+            if ( n > 0 ) ay = param[0] * 100;
+            if ( n > 1 ) ax = param[1] * 100;
             if ( n > 2 && param[2] > 0 ) tx = param[2];
             if ( n > 3 && param[3] > 0 ) ty = param[3];
 
-            if ( ax <= 0 ) ax = 1;
-            if ( ay <= 0 ) ay = 1;
+            if ( ax < 0 ) ax = 10;
+            if ( ay < 0 ) ay = 10;
 
 	    if ( gdImageSX(im) < tx || gdImageSY(im) < ty ) {
 		if ( (dm = gdImageCreateTrueColor(
@@ -253,14 +227,12 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize)
                     if ( param[2] > 360 ) param[2] = 360;
                     if ( param[3] > 100 ) param[3] = 100;
                     if ( param[4] > 100 ) param[4] = 100;
-                    sixel_palet[col] = HLStoRGB(param[2] * 100 / 360, param[3], param[4]);
-		    sixel_palinit[col] |= 2;
+                    palet[col] = HLStoRGB(param[2] * 100 / 360, param[3], param[4]);
                 } else if ( param[1] == 2 ) {    // RGB
                     if ( param[2] > 100 ) param[2] = 100;
                     if ( param[3] > 100 ) param[3] = 100;
                     if ( param[4] > 100 ) param[4] = 100;
-		    sixel_palet[col] = XRGB(param[2], param[3], param[4]);
-		    sixel_palinit[col] |= 2;
+		    palet[col] = XRGB(param[2], param[3], param[4]);
 		}
             }
 
@@ -298,16 +270,12 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize)
                 px += rep;
 
             } else {
-		if ( sixel_palinit[col] == 0 )
-		    sixel_palfix = 1;
-		sixel_palinit[col] |= 1;
-
                 a = 0x01;
 
 		if ( rep <= 1 ) {
                     for ( i = 0 ; i < 6 ; i++ ) {
                         if ( (b & a) != 0 ) {
-                            gdImageSetPixel(im, px, py + i, sixel_palet[col]);
+                            gdImageSetPixel(im, px, py + i, palet[col]);
                             if ( mx < px )
                                 mx = px;
                             if ( my < (py + i) )
@@ -327,7 +295,7 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize)
                                 c <<= 1;
                             }
 			    gdImageFilledRectangle(im, px, py + i,
-			    		px + rep - 1, py + i + n - 1, sixel_palet[col]);
+			    		px + rep - 1, py + i + n - 1, palet[col]);
     
                             if ( mx < (px + rep - 1)  )
                                 mx = px + rep - 1;
@@ -363,23 +331,19 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p, int bReSize)
 	im = dm;
     }
 
-    gdImageTrueColorToPalette(im, 0, 256);
-
-    if ( bReSize ) {
-        sixel_param = NULL;
-	sprintf(gra, "\"%d;%d", ay, ax);
+    if ( ax != 100 || ay != 100 ) {
+	mx = gdImageSX(im) * ax / 100;
+	my = gdImageSY(im) * ay / 100;
+	if ( (dm = gdImageCreateTrueColor(mx, my)) == NULL )
+	    return NULL;
+	dm->alphaBlendingFlag = 0;
+	gdImageCopyResampled(dm, im, 0, 0, 0, 0, 
+		mx, my, gdImageSX(im), gdImageSY(im));
+	gdImageDestroy(im);
+	im = dm;
     }
 
+    //gdImageTrueColorToPalette(im, 0, 256);
+
     return im;
-}
-void FromSixelFree()
-{
-    int n;
-
-    for ( n = 0 ; n < PALMAX ; n++ )
-	sixel_palinit[n] = 0;
-
-    sixel_param = NULL;
-    sixel_gra   = NULL;
-    sixel_palfix = 0;
 }
