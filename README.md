@@ -12,7 +12,7 @@ License
 This work is written by kmiya@ culti.
 He distributes it under very permissive license.
 
-The original license text(in Japanese only) is:
+The original license text(in Japanese) is:
 
 ```
  このプログラム及びソースコードの使用について個人・商用を問わず
