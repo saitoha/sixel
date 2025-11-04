@@ -8,11 +8,11 @@ typedef unsigned char BYTE;
 
 #define PALVAL(n,a,m)	(((n) * (a) + ((m) / 2)) / (m))
 
-#define	XRGB(r,g,b) gdTrueColor(PALVAL(r,gdRedMax, 100), \
-			PALVAL(g,gdGreenMax, 100), PALVAL(b,gdBlueMax, 100))
+#define	XRGB(r,g,b)	gdTrueColor(PALVAL(r,gdRedMax, 100), \
+				PALVAL(g,gdGreenMax, 100), PALVAL(b,gdBlueMax, 100))
 
 #define	RGBMAX	gdRedMax
-#define	HLSMAX	100
+#define	HLSMAX	600
 #define	PALMAX	1024
 
 static int ColTab[] = {
@@ -51,7 +51,7 @@ static int HueToRGB(int n1, int n2, int hue)
     else
 	return ( n1 );
 }
-static int HLStoRGB(int hue, int lum, int sat)
+static int HLStoRGB(int hue, int lum, int sat, int alpha)
 {
     int R, G, B;
     int Magic1, Magic2;
@@ -69,7 +69,7 @@ static int HLStoRGB(int hue, int lum, int sat)
         G = (HueToRGB(Magic1, Magic2, hue) * RGBMAX + (HLSMAX / 2)) / HLSMAX;
         B = (HueToRGB(Magic1, Magic2, hue - (HLSMAX / 3)) * RGBMAX + (HLSMAX/2)) / HLSMAX;
     }
-    return gdTrueColor(R, G, B);
+    return gdTrueColorAlpha(R, G, B, alpha);
 }
 static BYTE *GetParam(BYTE *p, int *param, int *len)
 {
@@ -109,6 +109,11 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p)
     gdImagePtr im, dm;
     BYTE *s;
     int palet[PALMAX];
+    int Px, Py, Pz, Pa;
+    int Mx, My, Mz, Ma;
+    int max[3][4] = { { 360, 100, 100, 100 },	/* HLS */
+		      { 100, 100, 100, 100 },	/* RGB */
+		      { 255, 255, 255, 255 } };	/* RGB 8bits */
 
     px = py = 0;
     mx = my = 0;
@@ -211,6 +216,39 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p)
             if ( n > 0 )
                 rep = param[0];
 
+        } else if ( *p == '*' ) { // RLGCIMAX * Pu ; Px...
+            p = GetParam(++p, param, &n);
+
+	    if ( n > 0 ) {
+		if ( (i = param[0] - 1) >= 0 && i <= 2 ) {
+		    max[i][0] = (n > 1 ? param[1] : 0);
+		    max[i][1] = (n > 2 ? param[2] : 0);
+		    max[i][2] = (n > 3 ? param[3] : 0);
+		    max[i][3] = (n > 4 ? param[4] : 0);
+
+		    switch(param[0]) {
+		    case 1:	// HLS
+			if ( max[0][0] <= 0 ) max[0][0] = 360;
+			if ( max[0][1] <= 0 ) max[0][1] = 100;
+			if ( max[0][2] <= 0 ) max[0][2] = 100;
+			if ( max[0][3] <= 0 ) max[0][3] = 100;
+			break;
+		    case 2:	// RGB
+			if ( max[1][0] <= 0 ) max[1][0] = 100;
+			if ( max[1][1] <= 0 ) max[1][1] = 100;
+			if ( max[1][2] <= 0 ) max[1][2] = 100;
+			if ( max[1][3] <= 0 ) max[1][3] = 100;
+			break;
+		    case 3:	// R8G8B8
+			if ( max[2][0] <= 0 ) max[2][0] = 255;
+			if ( max[2][1] <= 0 ) max[2][1] = 255;
+			if ( max[2][2] <= 0 ) max[2][2] = 255;
+			if ( max[2][3] <= 0 ) max[2][3] = 255;
+			break;
+		    }
+		}
+	    }
+
         } else if ( *p == '#' ) {
 			// DECGCI Graphics Color Introducer # Pc ; Pu; Px; Py; Pz 
             p = GetParam(++p, param, &n);
@@ -222,17 +260,32 @@ gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p)
                     col = PALMAX - 1;
             }
 
-            if ( n > 4 ) {
-                if ( param[1] == 1 ) {            // HLS
-                    if ( param[2] > 360 ) param[2] = 360;
-                    if ( param[3] > 100 ) param[3] = 100;
-                    if ( param[4] > 100 ) param[4] = 100;
-                    palet[col] = HLStoRGB(param[2] * 100 / 360, param[3], param[4]);
-                } else if ( param[1] == 2 ) {    // RGB
-                    if ( param[2] > 100 ) param[2] = 100;
-                    if ( param[3] > 100 ) param[3] = 100;
-                    if ( param[4] > 100 ) param[4] = 100;
-		    palet[col] = XRGB(param[2], param[3], param[4]);
+            if ( n > 4 && (i = param[1] - 1) >= 0 && i <= 2 ) {
+		Mx = max[i][0];
+		My = max[i][1];
+		Mz = max[i][2];
+		Ma = max[i][3];
+
+		if ( (Px = param[2]) > Mx ) Px = Mx;
+		if ( (Py = param[3]) > My ) Py = My;
+		if ( (Pz = param[4]) > Mz ) Pz = Mz;
+		if ( n <= 5 || (Pa = param[5]) > Ma ) Pa = Ma;
+		
+                if ( param[1] == 1 ) {		// HLS
+                    palet[col] = HLStoRGB(
+			(Px * HLSMAX + Mx / 2) / Mx, 
+			(Py * HLSMAX + My / 2) / My, 
+			(Pz * HLSMAX + Mz / 2) / Mz,
+			gdAlphaTransparent - 
+			(Pa * gdAlphaMax + Ma / 2) / Ma);
+
+                } else {			// RGB R8G8B8
+		    palet[col] = gdTrueColorAlpha(
+			(Px * gdRedMax   + Mx / 2) / Mx, 
+			(Py * gdGreenMax + My / 2) / My, 
+			(Pz * gdBlueMax  + Mz / 2) / Mz,
+			gdAlphaTransparent - 
+			(Pa * gdAlphaMax + Ma / 2) / Ma);
 		}
             }
 

@@ -2,12 +2,13 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <gd.h>
 
 typedef unsigned char BYTE;
 
-void gdImageSixel(gdImagePtr gd, FILE *out, int maxPalet, int optTrue, int optFill);
+void gdImageSixel(gdImagePtr gd, FILE *out);
 gdImagePtr gdImageCreateFromSixelPtr(int len, BYTE *p);
 gdImagePtr gdImageCreateFromPnmPtr(int len, BYTE *p);
 
@@ -22,15 +23,25 @@ gdImagePtr gdImageCreateFromPnmPtr(int len, BYTE *p);
 #define	FMT_PNM	    8
 #define	FMT_GD2     9
 
+int maxPalet = gdMaxColors;
+int maxValue[4] = { 100, 100, 100, 100 };
+int optTrue = 0;
+int optFill = 0;
+int resWidth = (-1);
+int resHeight = (-1);
+
 static int FileFmt(int len, BYTE *data)
 {
-    if ( memcmp("TRUEVISION", data + len - 18, 10) == 0 )
+    if ( len < 3 )
+	return (-1);
+
+    if ( len > 18 && memcmp("TRUEVISION", data + len - 18, 10) == 0 )
 	return FMT_TGA;
 
     if ( memcmp("GIF", data, 3) == 0 )
 	return FMT_GIF;
 
-    if ( memcmp("\x89\x50\x4E\x47\x0D\x0A\x1A\x0A", data, 8) == 0 )
+    if ( len > 8 && memcmp("\x89\x50\x4E\x47\x0D\x0A\x1A\x0A", data, 8) == 0 )
 	return FMT_PNG;
 
     if ( memcmp("BM", data, 2) == 0 )
@@ -131,8 +142,7 @@ static gdImagePtr LoadFile(char *filename)
     return im;
 }
 
-static int ConvSixel(char *filename, int maxPalet,
-		int optTrue, int optFill, int resWidth, int resHeight)
+static int ConvSixel(char *filename)
 {
     gdImagePtr im = NULL;
     gdImagePtr dm = NULL;
@@ -158,27 +168,45 @@ static int ConvSixel(char *filename, int maxPalet,
 	im = dm;
     }
 
-    gdImageSixel(im, stdout, maxPalet, optTrue, optFill);
+    gdImageSixel(im, stdout);
     gdImageDestroy(im);
 
     return 0;
 }
+void setBitsMax(int bits)
+{
+    if ( bits < 1 || bits > 16 )
+	return;
+
+    maxValue[0] = maxValue[1] = maxValue[2] = maxValue[3] = (1 << bits) - 1;
+}
+void setMaxValue(char *str)
+{
+    int n = 3;
+
+    while ( n >= 0 && *str != '\0' ) {
+	maxValue[n--] = atoi(str);
+
+	while ( isdigit(*str) )
+	    str++;
+	while ( *str != '\0' && !isdigit(*str) )
+	    str++;
+    }
+
+    for ( ; n >= 0 && n < 3 ; n-- )
+	maxValue[n] = maxValue[n + 1];
+}
 void usage(char *name)
 {
-    fprintf(stderr, "Usage: %s [-p MaxPalet] [-tf] "\
+    fprintf(stderr, "Usage: %s [-p MaxPalet] [-b ColorBits] [-m MaxValue...] [-tf] "\
 		    "[-w width] [-h height] <file name...>\n", name);
 }
 int main(int ac, char *av[])
 {
     int n;
     int mx = 1;
-    int maxPalet = gdMaxColors;
-    int optTrue = 0;
-    int optFill = 0;
-    int resWidth = (-1);
-    int resHeight = (-1);
 
-    while ( (n = getopt(ac, av, "p:w:h:tf")) != EOF ) {
+    while ( (n = getopt(ac, av, "p:w:h:b:m:tf")) != EOF ) {
 	switch(n) {
 	case 'p':
 	    maxPalet = atoi(optarg);
@@ -188,6 +216,12 @@ int main(int ac, char *av[])
 	    break;
 	case 'h':
 	    resHeight = atoi(optarg);
+	    break;
+	case 'b':
+	    setBitsMax(atoi(optarg));
+	    break;
+	case 'm':
+	    setMaxValue(optarg);
 	    break;
 	case 't':
 	    optTrue = 1;
@@ -205,11 +239,11 @@ int main(int ac, char *av[])
 	av[mx++] = av[optind++];
 
     if ( mx <= 1 ) {
-	ConvSixel(NULL, maxPalet, optTrue, optFill, resWidth, resHeight);
+	ConvSixel(NULL);
 
     } else {
     	for ( n = 1 ; n < mx ; n++ )
-	    ConvSixel(av[n], maxPalet, optTrue, optFill, resWidth, resHeight);
+	    ConvSixel(av[n]);
     }
 
     return 0;

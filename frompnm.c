@@ -6,7 +6,7 @@
 
 typedef unsigned char BYTE;
 
-static char *GetLine(BYTE *p, BYTE *e, BYTE *line)
+static BYTE *GetLine(BYTE *p, BYTE *e, BYTE *line)
 {
     int n;
 
@@ -74,18 +74,18 @@ gdImagePtr gdImageCreateFromPnmPtr(int len, BYTE *p)
     p = GetLine(p, e, tmp);
 
     s = tmp;
-    width = atoi(s);
+    width = atoi((char *)s);
     while ( isdigit(*s) )
 	s++;
     while ( *s == ' ' )
 	s++;
-    height = atoi(s);
+    height = atoi((char *)s);
     while ( *s != '\0' )
 	s++;
 
     if ( maps > 0 ) {
 	p = GetLine(p, e, tmp);
-	deps = atoi(tmp);
+	deps = atoi((char *)tmp);
     }
 
     if ( width < 1 || height < 1 || deps < 1 )
@@ -108,9 +108,11 @@ gdImagePtr gdImageCreateFromPnmPtr(int len, BYTE *p)
 		        s = tmp;
 		    }
 		    if ( maps == 0 ) {
-			n = *s++ == '0';
+			n = *s == '0';
+			if ( *s != '\0' )
+			    s++;
 		    } else {
-		        n = atoi(s);
+		        n = atoi((char *)s);
 		        while ( isdigit(*s) )
 		            s++;
 		        while ( *s == ' ' )
