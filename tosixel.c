@@ -11,6 +11,7 @@
 
 typedef unsigned char BYTE;
 typedef unsigned short WORD;
+typedef __uint32_t DCHAR;
 
 typedef struct _PalNode {
 	struct _PalNode *next;
@@ -56,6 +57,15 @@ extern int optTrue;
 extern int optFill;
 extern int resWidth;
 extern int resHeight;
+extern int optIndex;
+extern int optNoise;
+extern int optTransCol;
+extern int optDrcs;
+extern char optDscs[4];
+extern int optDcss;
+extern int optDcn;
+extern int optFontW;
+extern int optFontH;
 
 /*********************************************************/
 
@@ -73,6 +83,149 @@ char *SixelStr(int val)
 	val >>= 6;
     }
     return p;
+}
+
+/*********************************************************/
+
+static void PutUtf8(DCHAR ch)
+{
+    int i;
+    int n = 0;
+    DCHAR c = ch;
+    int tmp[8];
+
+    tmp[n++] = 0x80 | (c & 0x3F);
+    c >>= 6;
+
+    if ( c <= 0x1F )
+	tmp[n++] = 0xC0 | c;
+    else {
+	tmp[n++] = 0x80 | (c & 0x3F);
+	c >>= 6;
+
+	if ( c <= 0x0F )
+	    tmp[n++] = 0xE0 | c;
+	else {
+	    tmp[n++] = 0x80 | (c & 0x3F);
+	    c >>= 6;
+
+	    if ( c <= 0x07 )
+		tmp[n++] = 0xF0 | c;
+	    else {
+		tmp[n++] = 0x80 | (c & 0x3F);
+		c >>= 6;
+
+		if ( c < 0x03 )
+		    tmp[n++] = 0xF8 | c;
+		else {
+		    tmp[n++] = 0x80 | (c & 0x3F);
+		    c >>= 6;
+
+		    tmp[n++] = 0xFC | c;
+		}
+	    }
+	}
+    }
+
+    while ( n > 0 )
+	fputc(tmp[--n], out_fp);
+}
+
+static void PutDrcs(int width, int height)
+{
+    int x, y;
+    int S = 0, I = 0, X = 0, F = 0, C = 0;
+    char *p = optDscs;
+    DCHAR uc = 0;
+
+    while ( *p != '\0' ) {
+	if ( *p >= 0x20 && *p <= 0x2F ) {
+	    I = X;
+	    X = *(p++);
+	} else if ( *p >= 0x30 && *p <= 0x7E ) {
+	    F = *(p++);
+	    break;
+	}
+    }
+    C = optDcn + 0x20;
+    S = optDcss == 0 ? 0x7E : 0x7F;
+
+    switch(optDrcs % 10) {
+    case 0:
+	fprintf(out_fp, "\0337\033%c%s", (optDcss == 0 ? '(' : ','), optDscs);
+	break;
+    case 1:	// DRCSMMv2
+	if ( I == 0 && X == 0x20 )
+	    uc = 0x100000 + (F << 8) | (optDcss == 0 ? 0x00 : 0x80) | C;
+	else
+	    uc = 0x100000;
+	break;
+    case 2:	// DRCSMMv3
+	if ( I == 0x20 && X >= 0x20 && X <= 0x2F && F >= 0x40 && F <= 0x7E && C >= 0x21 )
+	    uc = 0x100000 + ((X - 0x20) * 63 + (F - 0x40)) * 94 + (C - 0x21);
+	else
+	    uc = 0x100000;
+	break;
+    default:
+	return;
+    }
+
+    for ( y = 0 ; y < height ; y++ ) {
+	for ( x = 0 ; x < width ; x++ ) {
+	    switch(optDrcs % 10) {
+	    case 0:
+		if ( C > S ) {
+		    if ( ++F < 0x30 )
+			F = 0x30;
+		    else if ( F > 0x7E ) {
+			F = 0x30;
+
+			if ( ++X < 0x20 )
+			    X = 0x20;
+			else if ( X > 0x2F ) {
+			    X = 0x20;
+
+			    if ( ++I < 0x20 )
+				I = 0x20;
+			    else if ( I > 0x2F )
+				I = 0x20;
+			}
+		    }
+		    fprintf(out_fp, "\033%c", (optDcss == 0 ? '(' : ','));
+		    if ( I > 0 )
+			fputc(I, out_fp);
+		    if ( X > 0 )
+			fputc(X, out_fp);
+		    if ( F > 0 )
+			fputc(F, out_fp);
+		    C = (optDcss == 0 ? 0x21 : 0x20);
+		}
+		fputc(C++, out_fp);
+		break;
+	    case 1:
+	    	PutUtf8(uc);
+		F = (uc >> 8) & 0xFF;
+		S = uc & 0x80;
+		C = uc & 0x7F;
+		if ( ++C > 0x7F ) {
+		    C = 0x20;
+		    if ( ++F > 0x7E ) {
+			F = 0x30;
+			S ^= 0x80;
+		    }
+		}
+	    	uc = 0x100000 + (F << 8) | S | C;
+		break;
+	    case 2:
+		PutUtf8(uc++);
+		break;
+	    }
+	}
+	fputc('\n', out_fp);
+    }
+
+    if ( (optDrcs % 10) == 0 )
+	fprintf(out_fp, "\033(B\0338\033[%dB", height);
 }
 
 /*********************************************************/
@@ -398,6 +551,10 @@ static void PalInit(gdImagePtr im, int max, int back)
 		palet_idx[n] = (-1);
 	        continue;
 	    }
+	    if ( optTransCol != (-1) && (rgb & 0xFFFFFF) == optTransCol ) {
+		palet_idx[n] = (-1);
+	        continue;
+	    }
 
 	    palet_tab[idx].idx = idx;
 	    palet_tab[idx].init = 006;
@@ -439,11 +596,13 @@ static int PalAdd(gdImagePtr im, int x, int y)
 	      (gdImageRed  (im, n) << 16) |
 	      (gdImageGreen(im, n) <<  8) |
 	       gdImageBlue (im, n);
-    }
 
-    rgb = gdImageGetTrueColorPixel(im, x, y);
+    } else
+    	rgb = gdImageGetTrueColorPixel(im, x, y);
 
     if ( gdTrueColorGetAlpha(rgb) == gdAlphaTransparent )
+	return (-1);
+    if ( optTransCol != (-1) && (rgb & 0xFFFFFF) == optTransCol )
 	return (-1);
 
     PalRGB(rgb, &tmp);
@@ -546,7 +705,33 @@ void gdImageSixel(gdImagePtr im, FILE *out)
     palet_act = (-1);
     memset(map_buf, 0, palet_max * map_width);
 
-    PutFmt("\033Pq\"1;1;%d;%d\n", map_width, map_height);
+    if ( optDrcs >= 0 && (optDrcs / 10) == 2 )
+	goto SKIPDEFS;
+
+    switch(optDrcs % 10) {
+    case 0:
+	PutFmt("\033[?8800l\033P0;%d;0;%d;0;3;%d;%d{%s", 
+		optDcn, optFontW, optFontH, optDcss, optDscs);
+	break;
+    case 1:
+	PutFmt("\033[?8800h\033[?8801l\033P0;%d;0;%d;0;3;%d;%d{%s", 
+		optDcn, optFontW, optFontH, optDcss, optDscs);
+	break;
+    case 2:
+	PutFmt("\033[?8800;8801h\033P0;%d;0;%d;0;3;%d;%d{%s", 
+		optDcn, optFontW, optFontH, optDcss, optDscs);
+	break;
+    default:
+        PutStr("\033P;;;");
+        if ( optIndex >= 0 )
+	    PutFmt("%d", optIndex);
+        if ( optNoise > 0 )
+	    PutFmt(";%d", optNoise);
+        PutStr("q");
+	break;
+    }
+
+    PutFmt("\"1;1;%d;%d\n", map_width, map_height);
 
     if ( maxValue[0] != 100 || maxValue[1] != 100 || 
 	 maxValue[2] != 100 || maxValue[3] != 100 ) {
@@ -572,6 +757,11 @@ void gdImageSixel(gdImagePtr im, FILE *out)
     }
 
     PutStr("\033\\");
+
+SKIPDEFS:
+
+    if ( optDrcs >= 0 && (optDrcs / 10) != 1 )
+    	PutDrcs((map_width + optFontW - 1) / optFontW, (map_height + optFontH - 1) / optFontH);
 
     NodeFree();
     free(map_buf);
