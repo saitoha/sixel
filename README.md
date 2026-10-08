@@ -4,7 +4,7 @@ sixel (kmiya's sixel)
 
 This repository is unofficial mirror of "sixel"(kmiya's sixel).
 
-http://nanno.dip.jp/softlib/man/rlogin/sixel.tar.gz
+https://kmiya-culti.github.io/RLogin/sixel.tar.gz
 
 
 License
